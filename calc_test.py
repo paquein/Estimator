@@ -1,5 +1,6 @@
 import streamlit as st
 import sqlite3
+import pandas as pd
 
 def check_password():
     """Returns True if the user had the correct password."""
@@ -29,34 +30,54 @@ def check_password():
 if not check_password():
     st.stop()  # Do not run the rest of the app if not logged in
 
-# --- DATABASE SETUP (The 'Hidden' part) ---
-def get_unit_price(item_name):
-    # This simulates your 15-year database
-    prices = {
-        "Concrete Sidewalk": 120.00,
-        "Curb & Gutter": 85.00,
-        "Asphalt Patching": 45.00
-    }
-    return prices.get(item_name, 0.0)
+# --- INITIALIZE MEMORY ---
+# This creates an empty list if it's the first time opening the app
+if "estimate_list" not in st.session_state:
+    st.session_state.estimate_list = []
 
-# --- THE INTERFACE (The 'Streamlit' part) ---
-st.title("🚧 Regina V2: Smart Estimator")
+st.title("🚧 Regina Infrastructure Estimator")
 
-# Step 1: Selection from your 'Database'
-item_choice = st.selectbox("Select Infrastructure Item:", ["Concrete Sidewalk", "Curb & Gutter", "Asphalt Patching"])
-unit_price = get_unit_price(item_choice)
+# --- INPUT SECTION ---
+with st.expander("Add New Item", expanded=True):
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        item = st.selectbox("Infrastructure Item", ["Sidewalk", "Curb & Gutter", "Pavement Patch", "Driveway"])
+    with col2:
+        length = st.number_input("Quantity/Length", min_value=0.0, step=1.0, value=10.0)
+    with col3:
+        unit_price = st.number_input("Unit Price ($)", min_value=0.0, step=0.1, value=150.0)
 
-# Step 2: Dimensions
-col1, col2 = st.columns(2)
-with col1:
-    length = st.number_input("Length (m)", value=10.0)
-with col2:
-    qty = st.number_input("Quantity of Units", value=1)
+    # Calculation for THIS specific item
+    subtotal = length * unit_price
+    
+    if st.button("➕ Add to Estimate"):
+        # Add a dictionary of data to our "Memory" list
+        new_entry = {
+            "Item": item,
+            "Quantity": length,
+            "Price/Unit": f"${unit_price:,.2f}",
+            "Total": subtotal
+        }
+        st.session_state.estimate_list.append(new_entry)
+        st.success(f"Added {item} to the list!")
 
-# Step 3: The Calculation
-total_cost = unit_price * length * qty
-
-# Step 4: The Result
+# --- DISPLAY SECTION ---
 st.divider()
-st.metric(label=f"Estimated Cost for {item_choice}", value=f"${total_cost:,.2f}")
-st.caption(f"Based on current Unit Price: ${unit_price}/m")
+st.subheader("Current Estimation List")
+
+if st.session_state.estimate_list:
+    # Convert our memory list into a nice table
+    df = pd.DataFrame(st.session_state.estimate_list)
+    st.table(df)
+
+    # CALC TOTAL
+    grand_total = df["Total"].sum()
+    
+    st.metric(label="GRAND TOTAL ESTIMATE", value=f"${grand_total:,.2f}")
+
+    if st.button("🗑️ Clear All"):
+        st.session_state.estimate_list = []
+        st.rerun()
+else:
+    st.info("No items added yet. Use the section above to start your estimate.")

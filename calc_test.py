@@ -31,7 +31,6 @@ if not check_password():
     st.stop()  # Do not run the rest of the app if not logged in
 
 #############################################################################################################################################################################################################
-
 import streamlit as st
 import pandas as pd
 from datetime import date
@@ -44,44 +43,36 @@ if 'estimate_data' not in st.session_state:
 if 'editing_index' not in st.session_state:
     st.session_state.editing_index = None
 
-# --- 2. THE CONSOLIDATED TREE ---
-# Merged Full/Spot into Concrete Replacement and added Rebuild items here
+# --- 2. DATA TREE MAP ---
 LIST_MAP = {
     "Concrete Replacement": [
         "Install Standard Curb and Gutter", "Install Rolled Curb and Gutter", 
         "Install Reverse Curb and Gutter", "Install Median Curb", 
-        "Install Median Access Curb", "Install Median Apron", 
         "Install Sidewalk", "Install Pedestrian Ramp", 
-        "Install Standard Monolithic Walk, Curb & Gutter", 
-        "Install Rolled Monolithic Walk, Curb & Gutter", 
-        "Install Reverse Monolithic Walk, Curb & Gutter", 
-        "Install Residential Driveway Crossing (130 mm)", 
-        "Install Alley/Commercial Driveway Crossing (180 mm)", 
-        "Private Driveway (Rebar)", "Asphalt Driveway Repair",
-        "Slabjack Curb and Gutter", "Slabjack Concrete Slab", "Slabjack Combined Concrete",
-        "Install Perforated Pipe (Rebuild)", "Concrete Extensions (Rebuild)"
+        "Install Standard Monolithic Walk, Curb & Gutter",
+        "Install Residential Driveway Crossing (130 mm)",
+        "Slabjack Concrete Slab", "Concrete Extensions (Rebuild)"
     ],
     "Pavement": [
         "Asphalt Pavement Removal", "Cold Planing", "Asphalt Tack/Prime", 
-        "Hot Mix Asphaltic Concrete (Fine Mix)", "Hot Mix Asphaltic Concrete (Coarse Mix)", 
-        "Subgrade Preparation and Compaction", "Granular Base Course", "Granular Sub-Base Course",
-        "Excavation - Pavement Failure", "Concrete Base (Mix 4HE)"
+        "Hot Mix Asphaltic Concrete (Fine Mix)", "Hot Mix Asphaltic Concrete (Coarse Mix)",
+        "Excavation - Pavement Failure", "Granular Base Course"
     ],
     "Landscaping": [
         "Clearing and Grubbing", "Remove/Reinstate Existing Landscape Rock", 
-        "Remove Existing Brick", "Removal of Sidewalk Trip Hazard", "Install Existing Brick"
+        "Removal of Sidewalk Trip Hazard", "Topsoil and Seed", "Sod"
     ],
     "Water and Sewer": [
-        "Standard Water Box", "Standard Sewer Box", "Adjust Existing Water Box", 
-        "Adjust Existing Sewer Box", "New Hydrant Installation", "New Valve Installation"
+        "Adjust Existing Water Box", "Adjust Existing Sewer Box", 
+        "New Hydrant Installation", "New Valve Installation"
     ]
 }
 
-# --- 3. SIDEBAR & PROJECT DETAILS ---
+# --- 3. SIDEBAR ---
 with st.sidebar:
     st.title("📋 Project Details")
-    project_name = st.text_input("Project Name", value="Regina Infrastructure")
-    contract_no = st.text_input("Contract #", value="2026-001")
+    project_name = st.text_input("Project Name", value="Regina SIRP Package")
+    contract_no = st.text_input("Contract #", value="2026-SIRP")
     report_date = st.date_input("Report Date", date.today())
     
     st.divider()
@@ -91,7 +82,7 @@ with st.sidebar:
     
     st.divider()
     st.title("Navigation")
-    page = st.radio("Go to:", list(LIST_MAP.keys()) + ["Estimation Result"])
+    page = st.radio("Go to:", ["Global Quick Estimate"] + list(LIST_MAP.keys()) + ["Estimation Result"])
     
     st.divider()
     if st.button("Clear All Data", type="secondary"):
@@ -99,11 +90,56 @@ with st.sidebar:
         st.session_state.editing_index = None
         st.rerun()
 
-# --- 4. DATA ENTRY LOGIC ---
-if page != "Estimation Result":
-    st.header(f"{page}")
+# --- 4. GLOBAL QUICK ESTIMATE (SIRPESTI ENGINE) ---
+if page == "Global Quick Estimate":
+    st.header("🚀 SIRP Estimates: Global Automated Tool")
     
-    # Selection logic for editing existing rows
+    with st.container(border=True):
+        col_left, col_right = st.columns(2)
+        
+        with col_left:
+            road_len = st.number_input("Road Length (m)", value=0.0, step=10.0)
+            road_width = st.number_input("Road Width (include all lanes) (m)", value=0.0, step=0.1)
+            con_median = st.selectbox("Concrete Median?", ["No", "Yes"])
+            med_width = st.number_input("Median Width (m)", value=0.0, step=0.1)
+            blvd_area = st.selectbox("Boulevard Area?", ["No", "Yes"])
+            blvd_width = st.number_input("Boulevard Width (m)", value=0.0, step=0.1)
+            con_element = st.selectbox("Concrete Element", ["Separate Walk/Curb", "Monolithic Walk/Curb", "Curb Only"])
+            walk_width = st.number_input("Walk Width (m)", value=1.20, step=0.05)
+            
+        with col_right:
+            replace_pct = st.number_input("Replacement %", value=100)
+            fail_pct = st.number_input("Failure Repairs %", value=10)
+            
+            st.write("**Mill / Pave (mm)**")
+            m_col1, m_col2 = st.columns(2)
+            with m_col1: mill_depth = st.number_input("Mill", value=50, label_visibility="collapsed")
+            with m_col2: pave_depth = st.number_input("Pave", value=60, label_visibility="collapsed")
+            
+            ext_utils = st.selectbox("External Utilities", ["None", "Standard", "Heavy"])
+            road_type = st.selectbox("Road Type", ["Residential", "Collector", "Arterial"])
+
+    if st.button("⚡ Generate Automated Take-off", type="primary", use_container_width=True):
+        new_items = []
+        f_rep = replace_pct / 100.0
+        f_fail = fail_pct / 100.0
+
+        # Pavement Calc
+        p_area = road_len * road_width
+        new_items.append({"Category": "Pavement", "Item": f"Cold Planing ({mill_depth}mm)", "Quantity": p_area, "From": 0.0, "To": road_len, "Width": road_width, "Notes": "Global Auto-Calc"})
+        new_items.append({"Category": "Pavement", "Item": "Excavation - Pavement Failure", "Quantity": p_area * f_fail, "From": 0.0, "To": road_len, "Width": road_width * f_fail, "Notes": f"Based on {fail_pct}% failure"})
+
+        # Concrete Calc
+        if con_element != "Curb Only":
+            item_name = "Install Sidewalk" if con_element == "Separate Walk/Curb" else "Install Standard Monolithic Walk, Curb & Gutter"
+            new_items.append({"Category": "Concrete Replacement", "Item": item_name, "Quantity": road_len * walk_width * f_rep, "From": 0.0, "To": road_len, "Width": walk_width, "Notes": f"Global {replace_pct}% Replacement"})
+
+        st.session_state.estimate_data = new_items
+        st.success("Global Estimate Generated! Navigate to 'Estimation Result' to review.")
+
+# --- 5. MANUAL ENTRY TABS ---
+elif page != "Estimation Result":
+    st.header(f"{page}")
     edit_idx = st.session_state.editing_index
     is_editing = (edit_idx is not None and edit_idx < len(st.session_state.estimate_data) and st.session_state.estimate_data[edit_idx]["Category"] == page)
     cur = st.session_state.estimate_data[edit_idx] if is_editing else {}
@@ -113,82 +149,34 @@ if page != "Estimation Result":
         with col1:
             items = LIST_MAP.get(page, [])
             item = st.selectbox("Item Selection", items, index=items.index(cur["Item"]) if is_editing and cur["Item"] in items else 0)
-            f_val = st.number_input("From Station", value=float(cur.get("From", 0.0)), format="%.2f", step=1.0)
-            t_val = st.number_input("To Station", value=float(cur.get("To", 0.0)), format="%.2f", step=1.0)
-            w_val = st.number_input("Width (m)", value=float(cur.get("Width", 1.5)), step=0.1)
+            f_val = st.number_input("From Station", value=float(cur.get("From", 0.0)))
+            t_val = st.number_input("To Station", value=float(cur.get("To", 0.0)))
+            w_val = st.number_input("Width (m)", value=float(cur.get("Width", 1.5)))
         with col2:
             st.write("**Options**")
-            base_val = st.checkbox("Add Base Only", value=cur.get("Base", False))
-            seed_val = st.checkbox("Add Seed", value=cur.get("Seed", False))
-            sod_val = st.checkbox("Add SOD", value=cur.get("SOD", False))
+            base_val = st.checkbox("Base", value=cur.get("Base", False))
+            sod_val = st.checkbox("Sod", value=cur.get("Sod", False))
         with col3:
-            notes_val = st.text_area("Notes", value=cur.get("Notes", ""), height=225, placeholder="Enter site-specific details...")
+            notes_val = st.text_area("Notes", value=cur.get("Notes", ""), height=200)
 
-    # Action Buttons
     if is_editing:
-        c1, c2, c3 = st.columns([1, 1, 4])
-        with c1:
-            if st.button("✅ Update", type="primary", use_container_width=True):
-                st.session_state.estimate_data[edit_idx] = {
-                    "Category": page, "Item": item, "Unit": "m²", 
-                    "Quantity": abs(t_val - f_val) * w_val, "From": f_val, "To": t_val, 
-                    "Width": w_val, "Notes": notes_val, "Base": base_val, "Seed": seed_val, "SOD": sod_val
-                }
-                st.session_state.editing_index = None
-                st.rerun()
-        with c2:
-            if st.button("🗑️ Delete", type="secondary", use_container_width=True):
-                st.session_state.estimate_data.pop(edit_idx)
-                st.session_state.editing_index = None
-                st.rerun()
-        with c3:
-            if st.button("Cancel"):
-                st.session_state.editing_index = None
-                st.rerun()
+        if st.button("✅ Update Item"):
+            st.session_state.estimate_data[edit_idx] = {"Category": page, "Item": item, "Quantity": abs(t_val-f_val)*w_val, "From": f_val, "To": t_val, "Width": w_val, "Notes": notes_val, "Base": base_val, "Sod": sod_val}
+            st.session_state.editing_index = None
+            st.rerun()
     else:
-        if st.button("➕ Add to Estimate", type="primary"):
-            st.session_state.estimate_data.append({
-                "Category": page, "Item": item, "Unit": "m²", 
-                "Quantity": abs(t_val - f_val) * w_val, "From": f_val, "To": t_val, 
-                "Width": w_val, "Notes": notes_val, "Base": base_val, "Seed": seed_val, "SOD": sod_val
-            })
+        if st.button("➕ Add Item"):
+            st.session_state.estimate_data.append({"Category": page, "Item": item, "Quantity": abs(t_val-f_val)*w_val, "From": f_val, "To": t_val, "Width": w_val, "Notes": notes_val, "Base": base_val, "Sod": sod_val})
             st.rerun()
 
-    st.divider()
-
-    # Local Table for Current Page
+# --- 6. RESULTS ---
+else:
+    st.header(f"📊 Summary: {project_name}")
+    st.write(f"**Contract:** {contract_no} | **Est. By:** {est_by} | **Date:** {report_date}")
     if st.session_state.estimate_data:
         df = pd.DataFrame(st.session_state.estimate_data)
-        page_df = df[df['Category'] == page]
-        if not page_df.empty:
-            st.write(f"### {page} Work List")
-            event = st.dataframe(page_df[['Item', 'Quantity', 'From', 'To', 'Notes']], use_container_width=True, hide_index=True, on_select="rerun", selection_mode="single-row")
-            st.info(f"**Section Total:** {page_df['Quantity'].sum():.2f} m²")
-            if event.selection.rows:
-                st.session_state.editing_index = page_df.index[event.selection.rows[0]]
-                st.rerun()
-
-# --- 5. RESULT PAGE ---
-else:
-    st.header(f"📊 Project Summary: {project_name}")
-    
-    with st.container(border=True):
-        colA, colB = st.columns(2)
-        with colA:
-            st.write(f"**Contract #:** {contract_no}")
-            st.write(f"**Estimated by:** {est_by if est_by else 'Not Specified'}")
-        with colB:
-            st.write(f"**Date:** {report_date}")
-            st.write(f"**Reviewed by:** {rev_by if rev_by else 'Not Specified'}")
-    
-    if st.session_state.estimate_data:
-        final_df = pd.DataFrame(st.session_state.estimate_data)
-        st.write("### Project Totals by Item")
-        summary = final_df.groupby(['Category', 'Item'])['Quantity'].sum().reset_index()
-        st.table(summary)
-
+        st.table(df.groupby(['Category', 'Item'])['Quantity'].sum().reset_index())
         st.divider()
-        st.write("### Detailed Take-off")
-        st.dataframe(final_df[['Category', 'Item', 'Quantity', 'From', 'To', 'Notes']], use_container_width=True, hide_index=True)
+        st.dataframe(df, use_container_width=True, hide_index=True)
     else:
-        st.warning("No data recorded. Use the sidebar to navigate and add items.")
+        st.warning("No data recorded.")

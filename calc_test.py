@@ -45,10 +45,11 @@ def load_checklist_data():
 
 checklist_df = load_checklist_data()
 
-# Initialize Session States
+# --- 2. SESSION STATE INITIALIZATION ---
 if 'estimate_data' not in st.session_state:
     st.session_state.estimate_data = []
-if 'pm_checklist_state' not in st.session_state:
+
+def init_checklist():
     st.session_state.pm_checklist_state = {}
     for _, row in checklist_df.iterrows():
         uid = f"{row['p_clean']}_{row['t_clean']}_{row['index']}"
@@ -56,7 +57,10 @@ if 'pm_checklist_state' not in st.session_state:
             "task": row['t_clean'], "done": False, "na": False, "phase": row['p_clean']
         }
 
-# --- 2. LOGIC FUNCTIONS ---
+if 'pm_checklist_state' not in st.session_state:
+    init_checklist()
+
+# --- 3. LOGIC FUNCTIONS ---
 def save_state():
     return json.dumps({
         "checklist": st.session_state.pm_checklist_state,
@@ -72,7 +76,7 @@ def handle_check_change(uid, check_type):
         if is_na:
             st.session_state.pm_checklist_state[uid]["done"] = False
 
-# --- 3. FULL MAP LIST ---
+# --- 4. FULL MAP LIST ---
 LIST_MAP = {
     "Concrete Replacement": [
         "Install Standard Curb and Gutter", "Install Rolled Curb and Gutter", 
@@ -97,7 +101,7 @@ LIST_MAP = {
     ]
 }
 
-# --- 4. PDF ENGINE ---
+# --- 5. PDF ENGINE ---
 def create_pdf(p_name, c_no, r_date, e_by):
     pdf = FPDF()
     pdf.add_page()
@@ -121,7 +125,7 @@ def create_pdf(p_name, c_no, r_date, e_by):
         pdf.cell(35, 7, status, border='B', ln=True, align='C')
     return bytes(pdf.output())
 
-# --- 5. SIDEBAR ---
+# --- 6. SIDEBAR ---
 with st.sidebar:
     st.title("⚙️ Project Settings")
     p_name = st.text_input("Project Name", value="11th Ave Revitalization")
@@ -131,44 +135,40 @@ with st.sidebar:
     st.divider()
     page = st.radio("Navigation", ["Global Quick Estimate", "PM Checklist"] + list(LIST_MAP.keys()) + ["Estimation Result"])
 
-# --- 6. PAGES ---
+# --- 7. PAGES ---
 if page == "PM Checklist":
-    # --- HEADER AND VERTICAL STACKED BUTTONS ---
-    main_col, btn_col = st.columns([0.75, 0.25])
+    main_col, btn_col = st.columns([0.7, 0.3])
     
     with main_col:
         st.header("📋 Project Checklist")
         
     with btn_col:
-        # Button 1: Save
-        st.download_button(
-            label="💾 Save Progress", 
-            data=save_state(), 
-            file_name=f"{p_name}_save.json", 
-            use_container_width=True
-        )
+        # Save Progress
+        st.download_button(label="💾 Save Progress", data=save_state(), file_name=f"{p_name}_save.json", use_container_width=True)
         
-        # Button 2: Load (Styled to match)
-        st.write('<p style="font-size:14px; margin-bottom:0;">Load Progress</p>', unsafe_allow_html=True)
-        up_file = st.file_uploader("Load Progress", type="json", label_visibility="collapsed")
-        if up_file:
-            data = json.load(up_file)
-            st.session_state.pm_checklist_state = data.get("checklist", {})
-            st.session_state.estimate_data = data.get("estimates", [])
-            st.rerun()
+        # Load Progress (Improved Logic to prevent Loop)
+        st.write('<p style="font-size:14px; margin-bottom:0;">📂 Load Progress</p>', unsafe_allow_html=True)
+        up_file = st.file_uploader("Load Progress", type="json", label_visibility="collapsed", key="file_loader")
+        if up_file is not None:
+            load_data = json.load(up_file)
+            st.session_state.pm_checklist_state = load_data.get("checklist", {})
+            st.session_state.estimate_data = load_data.get("estimates", [])
+            st.toast("Data Loaded Successfully!")
+            # We don't rerun immediately inside the 'if' to avoid the uploader loop.
+            # The changes will reflect on the next interaction.
 
-        # Button 3: Export PDF
+        # Export PDF
         pdf_data = create_pdf(p_name, c_no, str(r_date), e_by)
-        st.download_button(
-            label="📥 Export PDF", 
-            data=pdf_data, 
-            file_name=f"{p_name}_Report.pdf", 
-            mime="application/pdf", 
-            use_container_width=True
-        )
+        st.download_button(label="📥 Export PDF", data=pdf_data, file_name=f"{p_name}_Report.pdf", mime="application/pdf", use_container_width=True)
+
+        # Clear All
+        if st.button("🗑️ Reset Checklist", use_container_width=True, type="secondary"):
+            init_checklist()
+            st.rerun()
 
     st.divider()
     
+    # Display Checklist
     phases = checklist_df['p_clean'].unique()
     for phase in phases:
         with st.expander(f"Phase: {phase}", expanded=True):
@@ -196,10 +196,8 @@ elif page == "Estimation Result":
     st.header("📊 Final Summary")
     if st.session_state.estimate_data:
         st.dataframe(pd.DataFrame(st.session_state.estimate_data), use_container_width=True)
-    else:
-        st.info("No data recorded.")
 
-else: # Manual entry sections
+else:
     st.header(f"Section: {page}")
     items = LIST_MAP.get(page, [])
     it = st.selectbox("Select Item", items)

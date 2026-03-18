@@ -48,8 +48,6 @@ checklist_df = load_checklist_data()
 # Initialize Session States
 if 'estimate_data' not in st.session_state:
     st.session_state.estimate_data = []
-if 'last_save_time' not in st.session_state:
-    st.session_state.last_save_time = "Never"
 if 'pm_checklist_state' not in st.session_state:
     st.session_state.pm_checklist_state = {}
     for _, row in checklist_df.iterrows():
@@ -58,26 +56,13 @@ if 'pm_checklist_state' not in st.session_state:
             "task": row['t_clean'], "done": False, "na": False, "phase": row['p_clean']
         }
 
-# --- 2. SAVE/LOAD LOGIC ---
+# --- 2. LOGIC FUNCTIONS ---
 def save_state():
-    st.session_state.last_save_time = datetime.now().strftime("%H:%M:%S")
-    state_json = json.dumps({
+    return json.dumps({
         "checklist": st.session_state.pm_checklist_state,
         "estimates": st.session_state.estimate_data
     })
-    return state_json
 
-def load_state(uploaded_file):
-    try:
-        data = json.load(uploaded_file)
-        st.session_state.pm_checklist_state = data.get("checklist", {})
-        st.session_state.estimate_data = data.get("estimates", [])
-        st.success("✅ Progress Loaded!")
-        st.rerun()
-    except Exception as e:
-        st.error(f"Load Error: {e}")
-
-# --- 3. CALLBACKS ---
 def handle_check_change(uid, check_type):
     if check_type == "done":
         st.session_state.pm_checklist_state[uid]["done"] = st.session_state[f"d_{uid}"]
@@ -87,45 +72,32 @@ def handle_check_change(uid, check_type):
         if is_na:
             st.session_state.pm_checklist_state[uid]["done"] = False
 
-# --- 4. FULL MAP LIST (RE-RESTORED) ---
+# --- 3. FULL MAP LIST ---
 LIST_MAP = {
     "Concrete Replacement": [
-        "Install Standard Curb and Gutter", 
-        "Install Rolled Curb and Gutter", 
-        "Install Reverse Curb and Gutter", 
-        "Install Median Curb", 
-        "Install Sidewalk", 
-        "Install Pedestrian Ramp", 
+        "Install Standard Curb and Gutter", "Install Rolled Curb and Gutter", 
+        "Install Reverse Curb and Gutter", "Install Median Curb", 
+        "Install Sidewalk", "Install Pedestrian Ramp", 
         "Install Standard Monolithic Walk, Curb & Gutter",
         "Install Residential Driveway Crossing (130 mm)",
-        "Slabjack Concrete Slab", 
-        "Concrete Extensions (Rebuild)"
+        "Slabjack Concrete Slab", "Concrete Extensions (Rebuild)"
     ],
     "Pavement": [
-        "Asphalt Pavement Removal", 
-        "Cold Planing", 
-        "Asphalt Tack/Prime", 
-        "Hot Mix Asphaltic Concrete (Fine Mix)", 
-        "Hot Mix Asphaltic Concrete (Coarse Mix)",
-        "Excavation - Pavement Failure", 
-        "Granular Base Course"
+        "Asphalt Pavement Removal", "Cold Planing", "Asphalt Tack/Prime", 
+        "Hot Mix Asphaltic Concrete (Fine Mix)", "Hot Mix Asphaltic Concrete (Coarse Mix)",
+        "Excavation - Pavement Failure", "Granular Base Course"
     ],
     "Landscaping": [
-        "Clearing and Grubbing", 
-        "Remove/Reinstate Existing Landscape Rock", 
-        "Removal of Sidewalk Trip Hazard", 
-        "Topsoil and Seed", 
-        "Sod"
+        "Clearing and Grubbing", "Remove/Reinstate Existing Landscape Rock", 
+        "Removal of Sidewalk Trip Hazard", "Topsoil and Seed", "Sod"
     ],
     "Water and Sewer": [
-        "Adjust Existing Water Box", 
-        "Adjust Existing Sewer Box", 
-        "New Hydrant Installation", 
-        "New Valve Installation"
+        "Adjust Existing Water Box", "Adjust Existing Sewer Box", 
+        "New Hydrant Installation", "New Valve Installation"
     ]
 }
 
-# --- 5. PDF ENGINE (Fixed "unsupported_error") ---
+# --- 4. PDF ENGINE ---
 def create_pdf(p_name, c_no, r_date, e_by):
     pdf = FPDF()
     pdf.add_page()
@@ -147,52 +119,45 @@ def create_pdf(p_name, c_no, r_date, e_by):
         status = "N/A" if data["na"] else ("DONE" if data["done"] else "PENDING")
         pdf.cell(145, 7, f"  {data['task']}", border='B')
         pdf.cell(35, 7, status, border='B', ln=True, align='C')
-    
-    # Returning as BYTES to satisfy Streamlit download_button
     return bytes(pdf.output())
 
-# --- 6. SIDEBAR ---
+# --- 5. SIDEBAR ---
 with st.sidebar:
-    st.title("📋 Control Panel")
+    st.title("📋 Project Control")
     p_name = st.text_input("Project Name", value="11th Ave Revitalization")
     c_no = st.text_input("Contract #", value="2026-SIRP")
     r_date = st.date_input("Report Date", date.today())
     e_by = st.text_input("PM Name")
     
     st.divider()
-    st.write("### 💾 Data Resilience")
-    # Save Progress
-    st.download_button(
-        label="💾 Save Progress (.json)", 
-        data=save_state(), 
-        file_name=f"{p_name}_save.json", 
-        use_container_width=True
-    )
-    
-    # Load Progress
-    up_file = st.file_uploader("📂 Load Saved File", type="json")
-    if up_file:
-        if st.button("Apply Loaded Progress", use_container_width=True):
-            load_state(up_file)
-
-    st.divider()
-    # Export PDF - Using the fixed create_pdf function
     pdf_data = create_pdf(p_name, c_no, str(r_date), e_by)
-    st.download_button(
-        label="📥 EXPORT PDF REPORT", 
-        data=pdf_data, 
-        file_name=f"{p_name}_Report.pdf", 
-        mime="application/pdf", 
-        type="primary", 
-        use_container_width=True
-    )
+    st.download_button("📥 EXPORT PDF REPORT", data=pdf_data, file_name=f"{p_name}_Report.pdf", 
+                       mime="application/pdf", type="primary", use_container_width=True)
     
     st.divider()
     page = st.radio("Menu", ["Global Quick Estimate", "PM Checklist"] + list(LIST_MAP.keys()) + ["Estimation Result"])
 
-# --- 7. PAGES ---
+# --- 6. PAGES ---
 if page == "PM Checklist":
-    st.header("📋 Project Management Checklist")
+    # --- TOP RIGHT CONTROLS ---
+    head_col, save_col, load_col = st.columns([0.5, 0.25, 0.25])
+    
+    with head_col:
+        st.header("📋 Project Checklist")
+        
+    with save_col:
+        st.download_button("💾 Save Progress", data=save_state(), file_name=f"{p_name}_save.json", use_container_width=True)
+        
+    with load_col:
+        up_file = st.file_uploader("📂 Load Progress", type="json", label_visibility="collapsed")
+        if up_file:
+            data = json.load(up_file)
+            st.session_state.pm_checklist_state = data.get("checklist", {})
+            st.session_state.estimate_data = data.get("estimates", [])
+            st.rerun() # Forces immediate refresh to show loaded data
+
+    st.divider()
+    
     phases = checklist_df['p_clean'].unique()
     for phase in phases:
         with st.expander(f"Phase: {phase}", expanded=True):
@@ -220,10 +185,8 @@ elif page == "Estimation Result":
     st.header("📊 Final Summary")
     if st.session_state.estimate_data:
         st.dataframe(pd.DataFrame(st.session_state.estimate_data), use_container_width=True)
-    else:
-        st.info("No estimates added yet.")
 
-else: # Manual Selection Pages
+else:
     st.header(f"Section: {page}")
     items = LIST_MAP.get(page, [])
     it = st.selectbox("Select Item", items)

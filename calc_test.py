@@ -3,6 +3,7 @@ import pandas as pd
 from datetime import date
 from fpdf import FPDF
 import os
+import json
 
 # --- 0. PASSWORD PROTECTION ---
 def check_password():
@@ -20,7 +21,7 @@ def check_password():
 if not check_password():
     st.stop()
 
-# --- 1. INITIALIZATION & DATA LOADING ---
+# --- 1. DATA LOADING & INITIALIZATION ---
 st.set_page_config(page_title="Regina Master Estimator", layout="wide")
 
 @st.cache_data
@@ -34,7 +35,6 @@ def load_checklist_data():
                 header_idx = i
                 break
         df = pd.read_csv(csv_path, header=header_idx)
-        # Standardize column names to prevent KeyErrors
         df.columns = [str(c).strip() for c in df.columns]
         df = df.dropna(subset=['Task'])
         df['Phase'] = df['Phase'].fillna("General/Other").str.strip()
@@ -47,13 +47,40 @@ checklist_df = load_checklist_data()
 # Initialize Session States
 if 'estimate_data' not in st.session_state:
     st.session_state.estimate_data = []
+
 if 'pm_checklist_state' not in st.session_state:
     st.session_state.pm_checklist_state = {}
     for _, row in checklist_df.iterrows():
         uid = f"{row['Phase']}_{row['Task']}_{row['index']}"
-        st.session_state.pm_checklist_state[uid] = {"task": row['Task'], "done": False, "na": False, "phase": row['Phase']}
+        st.session_state.pm_checklist_state[uid] = {
+            "task": row['Task'], 
+            "done": False, 
+            "na": False, 
+            "phase": row['Phase']
+        }
 
-# --- 2. CALLBACKS ---
+# --- 2. SAVE/LOAD LOGIC ---
+def save_state():
+    """Converts the current checklist and estimate into a JSON string."""
+    full_data = {
+        "checklist": st.session_state.pm_checklist_state,
+        "estimates": st.session_state.estimate_data
+    }
+    return json.dumps(full_data)
+
+def load_state(uploaded_file):
+    """Parses an uploaded JSON file and overwrites the current session state."""
+    try:
+        data = json.load(uploaded_file)
+        if "checklist" in data:
+            st.session_state.pm_checklist_state = data["checklist"]
+        if "estimates" in data:
+            st.session_state.estimate_data = data["estimates"]
+        st.success("✅ Progress Loaded Successfully!")
+    except Exception as e:
+        st.error(f"Error loading file: {e}")
+
+# --- 3. CALLBACKS ---
 def handle_check_change(uid, type):
     if type == "done":
         st.session_state.pm_checklist_state[uid]["done"] = st.session_state[f"d_{uid}"]
@@ -63,11 +90,10 @@ def handle_check_change(uid, type):
         if is_na:
             st.session_state.pm_checklist_state[uid]["done"] = False
 
-# --- 3. DATA TREE MAP (Original Lists Re-added) ---
+# --- 4. DATA TREE MAP ---
 LIST_MAP = {
     "Concrete Replacement": [
         "Install Standard Curb and Gutter", "Install Rolled Curb and Gutter", 
-        "Install Reverse Curb and Gutter", "Install Median Curb", 
         "Install Sidewalk", "Install Pedestrian Ramp", 
         "Install Standard Monolithic Walk, Curb & Gutter",
         "Install Residential Driveway Crossing (130 mm)",
@@ -88,26 +114,8 @@ LIST_MAP = {
     ]
 }
 
-# --- 4. SIDEBAR ---
-with st.sidebar:
-    st.title("📋 Project Details")
-    p_name = st.text_input("Project Name", value="Regina SIRP Package")
-    c_no = st.text_input("Contract #", value="2026-SIRP")
-    r_date = st.date_input("Report Date", date.today())
-    e_by = st.text_input("Estimated by")
-    
-    st.divider()
-    page = st.radio("Navigation", ["Global Quick Estimate", "PM Checklist"] + list(LIST_MAP.keys()) + ["Estimation Result"])
-    
-    if st.button("Clear All Data"):
-        st.session_state.estimate_data = []
-        for uid in st.session_state.pm_checklist_state:
-            st.session_state.pm_checklist_state[uid]["done"] = False
-            st.session_state.pm_checklist_state[uid]["na"] = False
-        st.rerun()
-
 # --- 5. PDF ENGINE ---
-def create_pdf():
+def create_pdf(p_name, c_no, r_date, e_by):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", 'B', 16)
@@ -136,31 +144,59 @@ def create_pdf():
         pdf.cell(0, 10, "Quantity Summary", ln=True)
         for row in st.session_state.estimate_data:
             pdf.set_font("Arial", size=9)
-            pdf.cell(100, 7, row['Item'], border=1)
-            pdf.cell(40, 7, f"{row['Quantity']:.2f}", border=1, ln=True)
-            
+            pdf.cell(100, 7, row.get('Item', 'Item'), border=1)
+            pdf.cell(40, 7, f"{row.get('Quantity', 0):.2f}", border=1, ln=True)
     return pdf.output(dest='S').encode('latin-1')
 
-# --- 6. PAGES ---
+# --- 6. SIDEBAR ---
+with st.sidebar:
+    st.title("📋 Project Details")
+    p_name = st.text_input("Project Name", value="Regina SIRP Package")
+    c_no = st.text_input("Contract #", value="2026-SIRP")
+    r_date = st.date_input("Report Date", date.today())
+    e_by = st.text_input("Estimated by")
+    
+    st.divider()
+    st.write("### 💾 Save / Load Progress")
+    # Save Button
+    st.download_button(
+        label="💾 Save Progress to File",
+        data=save_state(),
+        file_name=f"{p_name}_progress.json",
+        mime="application/json",
+        use_container_width=True
+    )
+    
+    # Load File Uploader
+    uploaded_file = st.file_uploader("📂 Load Progress from File", type="json")
+    if uploaded_file is not None:
+        if st.button("Apply Loaded Progress", use_container_width=True):
+            load_state(uploaded_file)
+    
+    st.divider()
+    # Progress Bar
+    done_count = sum(1 for v in st.session_state.pm_checklist_state.values() if v['done'])
+    total_tasks = len(st.session_state.pm_checklist_state)
+    progress = done_count / total_tasks if total_tasks > 0 else 0
+    st.write(f"Checklist Progress: {int(progress * 100)}%")
+    st.progress(progress)
+    
+    # PDF Button
+    st.download_button(
+        label="📥 DOWNLOAD FINAL PDF", 
+        data=create_pdf(p_name, c_no, str(r_date), e_by), 
+        file_name=f"{p_name}_Report.pdf", 
+        mime="application/pdf",
+        type="primary",
+        use_container_width=True
+    )
+    
+    st.divider()
+    page = st.radio("Navigation", ["Global Quick Estimate", "PM Checklist"] + list(LIST_MAP.keys()) + ["Estimation Result"])
 
-if page == "Global Quick Estimate":
-    st.header("🚀 SIRP Estimates: Global Automated Tool")
-    with st.container(border=True):
-        col_left, col_right = st.columns(2)
-        with col_left:
-            road_len = st.number_input("Road Length (m)", value=0.0)
-            road_width = st.number_input("Road Width (m)", value=0.0)
-        with col_right:
-            mill_depth = st.number_input("Mill depth (mm)", value=50)
+# --- 7. PAGES ---
 
-    if st.button("⚡ Generate Automated Take-off", type="primary"):
-        st.session_state.estimate_data.append({
-            "Category": "Pavement", "Item": f"Cold Planing ({mill_depth}mm)", 
-            "Quantity": road_len * road_width, "From": 0, "To": road_len, "Notes": "Auto"
-        })
-        st.success("Added to summary!")
-
-elif page == "PM Checklist":
+if page == "PM Checklist":
     st.header("📋 Project Management Checklist")
     phases = checklist_df['Phase'].unique()
     for phase in phases:
@@ -179,11 +215,29 @@ elif page == "PM Checklist":
                 with c3:
                     st.checkbox("N/A", key=f"n_{uid}", value=data["na"], on_change=handle_check_change, args=(uid, "na"))
 
+elif page == "Global Quick Estimate":
+    st.header("🚀 SIRP Estimates: Global Automated Tool")
+    with st.container(border=True):
+        col_left, col_right = st.columns(2)
+        with col_left:
+            road_len = st.number_input("Road Length (m)", value=0.0)
+            road_width = st.number_input("Road Width (m)", value=0.0)
+        with col_right:
+            mill_depth = st.number_input("Mill depth (mm)", value=50)
+
+    if st.button("⚡ Generate Automated Take-off", type="primary"):
+        st.session_state.estimate_data.append({
+            "Category": "Pavement", "Item": f"Cold Planing ({mill_depth}mm)", 
+            "Quantity": road_len * road_width, "From": 0, "To": road_len, "Notes": "Auto"
+        })
+        st.toast("Added to summary!")
+
 elif page == "Estimation Result":
     st.header("📊 Final Summary")
     if st.session_state.estimate_data:
-        st.table(pd.DataFrame(st.session_state.estimate_data))
-    st.download_button("📥 Download Final PDF Report", data=create_pdf(), file_name=f"{p_name}_Report.pdf", type="primary")
+        st.dataframe(pd.DataFrame(st.session_state.estimate_data), use_container_width=True)
+    else:
+        st.info("No estimate items recorded.")
 
 else: # Manual Entry Pages (Concrete, Pavement, etc.)
     st.header(f"Section: {page}")
@@ -197,6 +251,7 @@ else: # Manual Entry Pages (Concrete, Pavement, etc.)
         with col2:
             notes = st.text_area("Notes")
     if st.button("➕ Add Item"):
+        # Assuming standard width of 1.5m for auto-calc if not specified
         st.session_state.estimate_data.append({
             "Category": page, "Item": item, "Quantity": abs(t_val-f_val)*1.5, 
             "From": f_val, "To": t_val, "Notes": notes

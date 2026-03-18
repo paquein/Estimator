@@ -1,6 +1,9 @@
 import streamlit as st
-import sqlite3
 import pandas as pd
+import os            # <--- THIS IS THE MISSING ONE CAUSING YOUR ERROR
+import json
+from fpdf import FPDF
+from datetime import date, datetime
 
 def check_password():
     """Returns True if the user had the correct password."""
@@ -31,9 +34,7 @@ if not check_password():
     st.stop()  # Do not run the rest of the app if not logged in
 
 #############################################################################################################################################################################################################
-import streamlit as st
-import pandas as pd
-from datetime import date
+
 
 @st.cache_data
 def load_checklist_data():

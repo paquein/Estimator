@@ -125,7 +125,7 @@ LIST_MAP = {
     ]
 }
 
-# --- 5. PDF ENGINE ---
+# --- 5. PDF ENGINE (Fixed raise unsupported_error) ---
 def create_pdf(p_name, c_no, r_date, e_by):
     pdf = FPDF()
     pdf.add_page()
@@ -147,7 +147,9 @@ def create_pdf(p_name, c_no, r_date, e_by):
         status = "N/A" if data["na"] else ("DONE" if data["done"] else "PENDING")
         pdf.cell(145, 7, f"  {data['task']}", border='B')
         pdf.cell(35, 7, status, border='B', ln=True, align='C')
-    return pdf.output()
+    
+    # Ensuring return as BYTES for Streamlit compatibility
+    return bytes(pdf.output())
 
 # --- 6. SIDEBAR ---
 with st.sidebar:
@@ -159,14 +161,17 @@ with st.sidebar:
     
     st.divider()
     st.write("### 💾 Save/Load")
-    st.download_button("💾 Save Progress", data=save_state(), file_name=f"{p_name}_save.json", use_container_width=True)
+    st.download_button("💾 Save Progress (.json)", data=save_state(), file_name=f"{p_name}_save.json", use_container_width=True)
+    
     up_file = st.file_uploader("📂 Load Progress", type="json")
-    if up_file and st.button("Apply Load", use_container_width=True):
+    if up_file and st.button("Apply Loaded Data", use_container_width=True):
         load_state(up_file)
 
     st.divider()
-    st.download_button("📥 EXPORT PDF", data=create_pdf(p_name, c_no, str(r_date), e_by), 
-                       file_name=f"{p_name}_Report.pdf", mime="application/pdf", type="primary", use_container_width=True)
+    # Fixed the crash by ensuring bytes() conversion
+    pdf_bytes = create_pdf(p_name, c_no, str(r_date), e_by)
+    st.download_button("📥 EXPORT PDF REPORT", data=pdf_bytes, file_name=f"{p_name}_Report.pdf", 
+                       mime="application/pdf", type="primary", use_container_width=True)
     
     st.divider()
     page = st.radio("Menu", ["Global Quick Estimate", "PM Checklist"] + list(LIST_MAP.keys()) + ["Estimation Result"])

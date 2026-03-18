@@ -35,6 +35,31 @@ import streamlit as st
 import pandas as pd
 from datetime import date
 
+@st.cache_data
+def load_checklist_data():
+    csv_path = 'Roadways_Contract_Checklist.csv'
+    if os.path.exists(csv_path):
+        # Your specific logic for finding the header
+        raw_df = pd.read_csv(csv_path, header=None)
+        header_idx = 0
+        for i, row in raw_df.iterrows():
+            if any("task" in str(val).lower() for val in row.values):
+                header_idx = i
+                break
+        df = pd.read_csv(csv_path, header=header_idx)
+        df.columns = [str(c).lower().strip() for c in df.columns]
+        df = df.dropna(subset=['task'])
+        p_col = 'phase' if 'phase' in df.columns else df.columns[1]
+        df['p_clean'] = df[p_col].fillna("General").str.strip()
+        df['t_clean'] = df['task'].str.strip()
+        return df.reset_index()
+    else:
+        # Fallback so the app doesn't crash if the file is missing
+        return pd.DataFrame(columns=['t_clean', 'p_clean', 'index'])
+
+checklist_df = load_checklist_data()
+
+
 # --- 1. INITIALIZATION ---
 st.set_page_config(page_title="Regina Master Estimator", layout="wide")
 
@@ -90,6 +115,14 @@ with st.sidebar:
         st.session_state.editing_index = None
         st.rerun()
 
+# In your Sidebar section:
+with st.sidebar:
+    # ... your other inputs (p_name, c_no, etc) ...
+    
+    # Ensure "PM Checklist" is in this list:
+    nav_options = ["Global Quick Estimate", "PM Checklist"] + list(LIST_MAP.keys()) + ["Estimation Result"]
+    page = st.radio("Navigation", nav_options)
+
 # --- 4. GLOBAL QUICK ESTIMATE (SIRPESTI ENGINE) ---
 if page == "Global Quick Estimate":
     st.header("🚀 SIRP Estimates: Global Automated Tool")
@@ -136,6 +169,12 @@ if page == "Global Quick Estimate":
 
         st.session_state.estimate_data = new_items
         st.success("Global Estimate Generated! Navigate to 'Estimation Result' to review.")
+
+if page == "PM Checklist":
+    if not checklist_df.empty:
+        render_pm_checklist_page(p_name, c_no, r_date, e_by, checklist_df)
+    else:
+        st.error("Checklist CSV file not found. Please upload 'Roadways_Contract_Checklist.csv' to the folder.")
 
 # --- 5. MANUAL ENTRY TABS ---
 elif page != "Estimation Result":

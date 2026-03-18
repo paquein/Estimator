@@ -1,6 +1,7 @@
 import streamlit as st
+import sqlite3
 import pandas as pd
-import os            # <--- THIS IS THE MISSING ONE CAUSING YOUR ERROR
+import os
 import json
 from fpdf import FPDF
 from datetime import date, datetime
@@ -8,39 +9,34 @@ from datetime import date, datetime
 def check_password():
     """Returns True if the user had the correct password."""
     def password_entered():
-        # Change 'regina2026' to whatever password you want!
         if st.session_state["password"] == "franistheman":
             st.session_state["password_correct"] = True
-            del st.session_state["password"]  # don't store password
+            del st.session_state["password"]
         else:
             st.session_state["password_correct"] = False
 
     if "password_correct" not in st.session_state:
-        # First run, show input for password.
         st.text_input("Please enter the password to access the Estimator", 
                       type="password", on_change=password_entered, key="password")
         return False
     elif not st.session_state["password_correct"]:
-        # Password not correct, show input + error.
         st.text_input("Please enter the password to access the Estimator", 
                       type="password", on_change=password_entered, key="password")
         st.error("😕 Password incorrect")
         return False
     else:
-        # Password correct.
         return True
 
 if not check_password():
-    st.stop()  # Do not run the rest of the app if not logged in
+    st.stop()
 
-#############################################################################################################################################################################################################
-
+# --- 1. INITIALIZATION ---
+st.set_page_config(page_title="Regina Master Estimator", layout="wide")
 
 @st.cache_data
 def load_checklist_data():
     csv_path = 'Roadways_Contract_Checklist.csv'
     if os.path.exists(csv_path):
-        # Your specific logic for finding the header
         raw_df = pd.read_csv(csv_path, header=None)
         header_idx = 0
         for i, row in raw_df.iterrows():
@@ -54,20 +50,23 @@ def load_checklist_data():
         df['p_clean'] = df[p_col].fillna("General").str.strip()
         df['t_clean'] = df['task'].str.strip()
         return df.reset_index()
-    else:
-        # Fallback so the app doesn't crash if the file is missing
-        return pd.DataFrame(columns=['t_clean', 'p_clean', 'index'])
+    return pd.DataFrame(columns=['t_clean', 'p_clean', 'index'])
 
 checklist_df = load_checklist_data()
-
-
-# --- 1. INITIALIZATION ---
-st.set_page_config(page_title="Regina Master Estimator", layout="wide")
 
 if 'estimate_data' not in st.session_state:
     st.session_state.estimate_data = []
 if 'editing_index' not in st.session_state:
     st.session_state.editing_index = None
+
+# Initialize Checklist State
+if 'pm_checklist_state' not in st.session_state:
+    st.session_state.pm_checklist_state = {}
+    for _, row in checklist_df.iterrows():
+        uid = f"{row['p_clean']}_{row['t_clean']}_{row['index']}"
+        st.session_state.pm_checklist_state[uid] = {
+            "task": row['t_clean'], "done": False, "na": False, "phase": row['p_clean']
+        }
 
 # --- 2. DATA TREE MAP ---
 LIST_MAP = {
@@ -108,24 +107,89 @@ with st.sidebar:
     
     st.divider()
     st.title("Navigation")
-    page = st.radio("Go to:", ["Global Quick Estimate"] + list(LIST_MAP.keys()) + ["Estimation Result"])
+    # ADDED "PM Checklist" to the navigation list
+    page = st.radio("Go to:", ["Global Quick Estimate", "PM Checklist"] + list(LIST_MAP.keys()) + ["Estimation Result"])
     
     st.divider()
     if st.button("Clear All Data", type="secondary"):
         st.session_state.estimate_data = []
         st.session_state.editing_index = None
+        # Reset Checklist too
+        for k in st.session_state.pm_checklist_state:
+            st.session_state.pm_checklist_state[k]["done"] = False
+            st.session_state.pm_checklist_state[k]["na"] = False
         st.rerun()
 
-# In your Sidebar section:
-with st.sidebar:
-    # ... your other inputs (p_name, c_no, etc) ...
+# --- 4. PDF ENGINE ---
+def create_pdf_report():
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Helvetica", 'B', 16)
+    pdf.cell(0, 10, f"Project Status: {project_name}", ln=True)
+    pdf.set_font("Helvetica", size=10)
+    pdf.cell(0, 8, f"Contract: {contract_no} | Date: {report_date} | PM: {est_by}", ln=True)
+    pdf.ln(5)
     
-    # Ensure "PM Checklist" is in this list:
-    nav_options = ["Global Quick Estimate", "PM Checklist"] + list(LIST_MAP.keys()) + ["Estimation Result"]
-    page = st.radio("Navigation", nav_options)
+    current_phase = ""
+    for uid, data in st.session_state.pm_checklist_state.items():
+        if data['phase'] != current_phase:
+            current_phase = data['phase']
+            pdf.ln(2)
+            pdf.set_font("Helvetica", 'B', 10)
+            pdf.cell(0, 8, f"SECTION: {current_phase}", ln=True)
+            pdf.set_font("Helvetica", size=9)
+        
+        status = "N/A" if data["na"] else ("DONE" if data["done"] else "PENDING")
+        pdf.cell(145, 7, f"  {data['task']}", border='B')
+        pdf.cell(35, 7, status, border='B', ln=True, align='C')
+    return bytes(pdf.output())
 
-# --- 4. GLOBAL QUICK ESTIMATE (SIRPESTI ENGINE) ---
-if page == "Global Quick Estimate":
+# --- 5. PAGE LOGIC ---
+
+if page == "PM Checklist":
+    main_col, btn_col = st.columns([0.7, 0.3])
+    with main_col:
+        st.header("📋 Project Management Checklist")
+    with btn_col:
+        # Save Progress
+        save_json = json.dumps({"checklist": st.session_state.pm_checklist_state, "estimates": st.session_state.estimate_data})
+        st.download_button("💾 Save Progress", data=save_json, file_name=f"{project_name}_save.json", use_container_width=True)
+        
+        # Load Progress
+        st.write('<p style="font-size:14px; margin-bottom:0; font-weight:bold;">📂 Load Progress</p>', unsafe_allow_html=True)
+        up_file = st.file_uploader("Load", type="json", label_visibility="collapsed", key="chk_load")
+        if up_file:
+            l_data = json.load(up_file)
+            st.session_state.pm_checklist_state = l_data.get("checklist", {})
+            st.session_state.estimate_data = l_data.get("estimates", [])
+            st.toast("Data Loaded!")
+
+        # Export PDF
+        pdf_b = create_pdf_report()
+        st.download_button("📥 Export PDF", data=pdf_b, file_name=f"{project_name}_Report.pdf", mime="application/pdf", use_container_width=True)
+
+        if st.button("🗑️ Reset All Checks", use_container_width=True):
+            for k in st.session_state.pm_checklist_state:
+                st.session_state.pm_checklist_state[k]["done"] = False
+                st.session_state.pm_checklist_state[k]["na"] = False
+            st.rerun()
+
+    st.divider()
+    for phase in checklist_df['p_clean'].unique():
+        with st.expander(f"Phase: {phase}", expanded=True):
+            p_uids = [u for u, v in st.session_state.pm_checklist_state.items() if v['phase'] == phase]
+            for uid in p_uids:
+                data = st.session_state.pm_checklist_state[uid]
+                c1, c2, c3 = st.columns([0.7, 0.15, 0.15])
+                with c1:
+                    style = "color: #adb5bd; text-decoration: line-through;" if data["na"] else "font-weight: bold;"
+                    st.markdown(f"<p style='{style} margin:0;'>{data['task']}</p>", unsafe_allow_html=True)
+                with c2:
+                    st.session_state.pm_checklist_state[uid]["done"] = st.checkbox("Done", key=f"d_{uid}", value=data["done"], disabled=data["na"])
+                with c3:
+                    st.session_state.pm_checklist_state[uid]["na"] = st.checkbox("N/A", key=f"n_{uid}", value=data["na"])
+
+elif page == "Global Quick Estimate":
     st.header("🚀 SIRP Estimates: Global Automated Tool")
     
     with st.container(border=True):
@@ -158,27 +222,29 @@ if page == "Global Quick Estimate":
         f_rep = replace_pct / 100.0
         f_fail = fail_pct / 100.0
 
-        # Pavement Calc
         p_area = road_len * road_width
         new_items.append({"Category": "Pavement", "Item": f"Cold Planing ({mill_depth}mm)", "Quantity": p_area, "From": 0.0, "To": road_len, "Width": road_width, "Notes": "Global Auto-Calc"})
         new_items.append({"Category": "Pavement", "Item": "Excavation - Pavement Failure", "Quantity": p_area * f_fail, "From": 0.0, "To": road_len, "Width": road_width * f_fail, "Notes": f"Based on {fail_pct}% failure"})
 
-        # Concrete Calc
         if con_element != "Curb Only":
             item_name = "Install Sidewalk" if con_element == "Separate Walk/Curb" else "Install Standard Monolithic Walk, Curb & Gutter"
             new_items.append({"Category": "Concrete Replacement", "Item": item_name, "Quantity": road_len * walk_width * f_rep, "From": 0.0, "To": road_len, "Width": walk_width, "Notes": f"Global {replace_pct}% Replacement"})
 
         st.session_state.estimate_data = new_items
-        st.success("Global Estimate Generated! Navigate to 'Estimation Result' to review.")
+        st.success("Global Estimate Generated!")
 
-if page == "PM Checklist":
-    if not checklist_df.empty:
-        render_pm_checklist_page(p_name, c_no, r_date, e_by, checklist_df)
+elif page == "Estimation Result":
+    st.header(f"📊 Summary: {project_name}")
+    st.write(f"**Contract:** {contract_no} | **Est. By:** {est_by} | **Date:** {report_date}")
+    if st.session_state.estimate_data:
+        df = pd.DataFrame(st.session_state.estimate_data)
+        st.table(df.groupby(['Category', 'Item'])['Quantity'].sum().reset_index())
+        st.divider()
+        st.dataframe(df, use_container_width=True, hide_index=True)
     else:
-        st.error("Checklist CSV file not found. Please upload 'Roadways_Contract_Checklist.csv' to the folder.")
+        st.warning("No data recorded.")
 
-# --- 5. MANUAL ENTRY TABS ---
-elif page != "Estimation Result":
+else: # Manual Entry Pages (Concrete, Pavement, etc.)
     st.header(f"{page}")
     edit_idx = st.session_state.editing_index
     is_editing = (edit_idx is not None and edit_idx < len(st.session_state.estimate_data) and st.session_state.estimate_data[edit_idx]["Category"] == page)
@@ -208,127 +274,3 @@ elif page != "Estimation Result":
         if st.button("➕ Add Item"):
             st.session_state.estimate_data.append({"Category": page, "Item": item, "Quantity": abs(t_val-f_val)*w_val, "From": f_val, "To": t_val, "Width": w_val, "Notes": notes_val, "Base": base_val, "Sod": sod_val})
             st.rerun()
-
-# --- 6. RESULTS ---
-else:
-    st.header(f"📊 Summary: {project_name}")
-    st.write(f"**Contract:** {contract_no} | **Est. By:** {est_by} | **Date:** {report_date}")
-    if st.session_state.estimate_data:
-        df = pd.DataFrame(st.session_state.estimate_data)
-        st.table(df.groupby(['Category', 'Item'])['Quantity'].sum().reset_index())
-        st.divider()
-        st.dataframe(df, use_container_width=True, hide_index=True)
-    else:
-        st.warning("No data recorded.")
-
-
-# ==========================================
-# 📋 STANDALONE MODULE: IMPORTS + PDF + CHECKLIST
-# ==========================================
-import streamlit as st
-import pandas as pd
-import json
-from fpdf import FPDF
-from datetime import date
-
-def create_pdf_report(p_name, c_no, r_date, e_by, checklist_state):
-    """Generates the PDF bytes from the current checklist state."""
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Helvetica", 'B', 16)
-    pdf.cell(0, 10, f"Project Status: {p_name}", ln=True)
-    pdf.set_font("Helvetica", size=10)
-    pdf.cell(0, 8, f"Contract: {c_no} | Date: {r_date} | PM: {e_by}", ln=True)
-    pdf.ln(5)
-    
-    current_phase = ""
-    for uid, data in checklist_state.items():
-        if data['phase'] != current_phase:
-            current_phase = data['phase']
-            pdf.ln(2)
-            pdf.set_font("Helvetica", 'B', 10)
-            pdf.cell(0, 8, f"SECTION: {current_phase}", ln=True)
-            pdf.set_font("Helvetica", size=9)
-        
-        status = "N/A" if data["na"] else ("DONE" if data["done"] else "PENDING")
-        pdf.cell(145, 7, f"  {data['task']}", border='B')
-        pdf.cell(35, 7, status, border='B', ln=True, align='C')
-    
-    return bytes(pdf.output())
-
-def render_pm_checklist_page(p_name, c_no, r_date, e_by, checklist_df):
-    """Main Checklist UI with Stacked Controls."""
-    
-    # 1. Initialize State if missing
-    if 'pm_checklist_state' not in st.session_state:
-        st.session_state.pm_checklist_state = {}
-        for _, row in checklist_df.iterrows():
-            uid = f"{row['p_clean']}_{row['t_clean']}_{row['index']}"
-            st.session_state.pm_checklist_state[uid] = {
-                "task": row['t_clean'], "done": False, "na": False, "phase": row['p_clean']
-            }
-
-    # 2. Layout: Main Checklist vs Button Stack
-    main_col, btn_col = st.columns([0.75, 0.25])
-    
-    with main_col:
-        st.header("📋 Project Checklist")
-        
-    with btn_col:
-        # --- BUTTON 1: SAVE ---
-        save_json = json.dumps({
-            "checklist": st.session_state.pm_checklist_state,
-            "estimates": st.session_state.get('estimate_data', [])
-        })
-        st.download_button("💾 Save Progress", data=save_json, 
-                           file_name=f"{p_name}_save.json", use_container_width=True)
-        
-        # --- BUTTON 2: LOAD (Caption + Uploader) ---
-        st.write('<p style="font-size:14px; margin-bottom:0; font-weight:bold;">📂 Load Progress</p>', unsafe_allow_html=True)
-        up_file = st.file_uploader("Load", type="json", label_visibility="collapsed", key="chk_loader_standalone")
-        if up_file is not None:
-            load_data = json.load(up_file)
-            st.session_state.pm_checklist_state = load_data.get("checklist", {})
-            st.session_state.estimate_data = load_data.get("estimates", [])
-            st.toast("✅ Data Loaded! (Click any checkbox to refresh)")
-
-        # --- BUTTON 3: EXPORT PDF ---
-        pdf_bytes = create_pdf_report(p_name, c_no, str(r_date), e_by, st.session_state.pm_checklist_state)
-        st.download_button("📥 Export PDF", data=pdf_bytes, 
-                           file_name=f"{p_name}_Report.pdf", mime="application/pdf", use_container_width=True)
-
-        # --- BUTTON 4: RESET ---
-        if st.button("🗑️ Reset All Checks", use_container_width=True):
-            for uid in st.session_state.pm_checklist_state:
-                st.session_state.pm_checklist_state[uid]["done"] = False
-                st.session_state.pm_checklist_state[uid]["na"] = False
-            st.rerun()
-
-    st.divider()
-
-    # 3. Render Checklist Phases
-    phases = checklist_df['p_clean'].unique()
-    for phase in phases:
-        with st.expander(f"Phase: {phase}", expanded=True):
-            p_uids = [u for u, v in st.session_state.pm_checklist_state.items() if v['phase'] == phase]
-            for uid in p_uids:
-                data = st.session_state.pm_checklist_state[uid]
-                c1, c2, c3 = st.columns([0.7, 0.15, 0.15])
-                
-                with c1:
-                    style = "color: #adb5bd; text-decoration: line-through;" if data["na"] else "font-weight: bold;"
-                    st.markdown(f"<p style='{style} margin:0;'>{data['task']}</p>", unsafe_allow_html=True)
-                
-                # Checkbox Logic with local state sync
-                with c2:
-                    st.session_state.pm_checklist_state[uid]["done"] = st.checkbox(
-                        "Done", key=f"d_{uid}", value=data["done"], disabled=data["na"]
-                    )
-                with c3:
-                    st.session_state.pm_checklist_state[uid]["na"] = st.checkbox(
-                        "N/A", key=f"n_{uid}", value=data["na"]
-                    )
-                    if st.session_state.pm_checklist_state[uid]["na"]:
-                        st.session_state.pm_checklist_state[uid]["done"] = False
-
-# ==========================================

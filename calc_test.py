@@ -1,39 +1,31 @@
 import streamlit as st
-import sqlite3
 import pandas as pd
+from datetime import date
+from fpdf import FPDF
 
+# --- 0. PASSWORD PROTECTION ---
 def check_password():
     """Returns True if the user had the correct password."""
     def password_entered():
-        # Change 'regina2026' to whatever password you want!
         if st.session_state["password"] == "franistheman":
             st.session_state["password_correct"] = True
-            del st.session_state["password"]  # don't store password
+            del st.session_state["password"]
         else:
             st.session_state["password_correct"] = False
 
     if "password_correct" not in st.session_state:
-        # First run, show input for password.
         st.text_input("Please enter the password to access the Estimator", 
                       type="password", on_change=password_entered, key="password")
         return False
     elif not st.session_state["password_correct"]:
-        # Password not correct, show input + error.
         st.text_input("Please enter the password to access the Estimator", 
                       type="password", on_change=password_entered, key="password")
         st.error("😕 Password incorrect")
         return False
-    else:
-        # Password correct.
-        return True
+    return True
 
 if not check_password():
-    st.stop()  # Do not run the rest of the app if not logged in
-
-#############################################################################################################################################################################################################
-import streamlit as st
-import pandas as pd
-from datetime import date
+    st.stop()
 
 # --- 1. INITIALIZATION ---
 st.set_page_config(page_title="Regina Master Estimator", layout="wide")
@@ -42,9 +34,14 @@ if 'estimate_data' not in st.session_state:
     st.session_state.estimate_data = []
 if 'editing_index' not in st.session_state:
     st.session_state.editing_index = None
+if 'pm_checklist' not in st.session_state:
+    # Initialize PM Checklist items
+    checklist_items = ["Detailed design done", "Designed Checked", "Contract documents done"]
+    st.session_state.pm_checklist = {item: {"done": False, "na": False} for item in checklist_items}
 
 # --- 2. DATA TREE MAP ---
 LIST_MAP = {
+    "PM Checklist": ["Detailed design done", "Designed Checked", "Contract documents done"],
     "Concrete Replacement": [
         "Install Standard Curb and Gutter", "Install Rolled Curb and Gutter", 
         "Install Reverse Curb and Gutter", "Install Median Curb", 
@@ -88,95 +85,126 @@ with st.sidebar:
     if st.button("Clear All Data", type="secondary"):
         st.session_state.estimate_data = []
         st.session_state.editing_index = None
+        for item in st.session_state.pm_checklist:
+            st.session_state.pm_checklist[item] = {"done": False, "na": False}
         st.rerun()
 
-# --- 4. GLOBAL QUICK ESTIMATE (SIRPESTI ENGINE) ---
+# --- 4. GLOBAL QUICK ESTIMATE ---
 if page == "Global Quick Estimate":
     st.header("🚀 SIRP Estimates: Global Automated Tool")
-    
     with st.container(border=True):
         col_left, col_right = st.columns(2)
-        
         with col_left:
             road_len = st.number_input("Road Length (m)", value=0.0, step=10.0)
-            road_width = st.number_input("Road Width (include all lanes) (m)", value=0.0, step=0.1)
-            con_median = st.selectbox("Concrete Median?", ["No", "Yes"])
-            med_width = st.number_input("Median Width (m)", value=0.0, step=0.1)
-            blvd_area = st.selectbox("Boulevard Area?", ["No", "Yes"])
-            blvd_width = st.number_input("Boulevard Width (m)", value=0.0, step=0.1)
+            road_width = st.number_input("Road Width (m)", value=0.0, step=0.1)
             con_element = st.selectbox("Concrete Element", ["Separate Walk/Curb", "Monolithic Walk/Curb", "Curb Only"])
             walk_width = st.number_input("Walk Width (m)", value=1.20, step=0.05)
-            
         with col_right:
             replace_pct = st.number_input("Replacement %", value=100)
             fail_pct = st.number_input("Failure Repairs %", value=10)
-            
-            st.write("**Mill / Pave (mm)**")
-            m_col1, m_col2 = st.columns(2)
-            with m_col1: mill_depth = st.number_input("Mill", value=50, label_visibility="collapsed")
-            with m_col2: pave_depth = st.number_input("Pave", value=60, label_visibility="collapsed")
-            
-            ext_utils = st.selectbox("External Utilities", ["None", "Standard", "Heavy"])
-            road_type = st.selectbox("Road Type", ["Residential", "Collector", "Arterial"])
+            mill_depth = st.number_input("Mill (mm)", value=50)
 
     if st.button("⚡ Generate Automated Take-off", type="primary", use_container_width=True):
         new_items = []
-        f_rep = replace_pct / 100.0
-        f_fail = fail_pct / 100.0
-
-        # Pavement Calc
         p_area = road_len * road_width
         new_items.append({"Category": "Pavement", "Item": f"Cold Planing ({mill_depth}mm)", "Quantity": p_area, "From": 0.0, "To": road_len, "Width": road_width, "Notes": "Global Auto-Calc"})
-        new_items.append({"Category": "Pavement", "Item": "Excavation - Pavement Failure", "Quantity": p_area * f_fail, "From": 0.0, "To": road_len, "Width": road_width * f_fail, "Notes": f"Based on {fail_pct}% failure"})
-
-        # Concrete Calc
-        if con_element != "Curb Only":
-            item_name = "Install Sidewalk" if con_element == "Separate Walk/Curb" else "Install Standard Monolithic Walk, Curb & Gutter"
-            new_items.append({"Category": "Concrete Replacement", "Item": item_name, "Quantity": road_len * walk_width * f_rep, "From": 0.0, "To": road_len, "Width": walk_width, "Notes": f"Global {replace_pct}% Replacement"})
-
         st.session_state.estimate_data = new_items
-        st.success("Global Estimate Generated! Navigate to 'Estimation Result' to review.")
+        st.success("Global Estimate Generated!")
 
-# --- 5. MANUAL ENTRY TABS ---
+# --- 5. PM CHECKLIST TAB ---
+elif page == "PM Checklist":
+    st.header("📋 Project Management Checklist")
+    st.write("Mark items as Done or Not Applicable (N/A).")
+    
+    with st.container(border=True):
+        for item in LIST_MAP["PM Checklist"]:
+            c1, c2, c3 = st.columns([0.6, 0.2, 0.2])
+            
+            is_na = st.session_state.pm_checklist[item]["na"]
+            label = f":grey[{item}]" if is_na else f"**{item}**"
+            
+            with c1:
+                st.write(label)
+            with c2:
+                # Checkbox for "Done" - disabled if N/A is true
+                done_val = st.checkbox("Done", key=f"d_{item}", value=st.session_state.pm_checklist[item]["done"], disabled=is_na)
+                st.session_state.pm_checklist[item]["done"] = done_val
+            with c3:
+                # Checkbox for "N/A"
+                na_val = st.checkbox("N/A", key=f"n_{item}", value=st.session_state.pm_checklist[item]["na"])
+                if na_val != st.session_state.pm_checklist[item]["na"]:
+                    st.session_state.pm_checklist[item]["na"] = na_val
+                    if na_val: st.session_state.pm_checklist[item]["done"] = False
+                    st.rerun()
+
+# --- 6. MANUAL ENTRY TABS ---
 elif page != "Estimation Result":
     st.header(f"{page}")
-    edit_idx = st.session_state.editing_index
-    is_editing = (edit_idx is not None and edit_idx < len(st.session_state.estimate_data) and st.session_state.estimate_data[edit_idx]["Category"] == page)
-    cur = st.session_state.estimate_data[edit_idx] if is_editing else {}
-
+    items = LIST_MAP.get(page, [])
     with st.container(border=True):
-        col1, col2, col3 = st.columns([0.3, 0.2, 0.5])
+        col1, col2 = st.columns([0.6, 0.4])
         with col1:
-            items = LIST_MAP.get(page, [])
-            item = st.selectbox("Item Selection", items, index=items.index(cur["Item"]) if is_editing and cur["Item"] in items else 0)
-            f_val = st.number_input("From Station", value=float(cur.get("From", 0.0)))
-            t_val = st.number_input("To Station", value=float(cur.get("To", 0.0)))
-            w_val = st.number_input("Width (m)", value=float(cur.get("Width", 1.5)))
+            item = st.selectbox("Item Selection", items)
+            f_val = st.number_input("From Station", value=0.0)
+            t_val = st.number_input("To Station", value=0.0)
+            w_val = st.number_input("Width (m)", value=1.5)
         with col2:
-            st.write("**Options**")
-            base_val = st.checkbox("Base", value=cur.get("Base", False))
-            sod_val = st.checkbox("Sod", value=cur.get("Sod", False))
-        with col3:
-            notes_val = st.text_area("Notes", value=cur.get("Notes", ""), height=200)
+            notes_val = st.text_area("Notes", value="")
+    
+    if st.button("➕ Add Item"):
+        st.session_state.estimate_data.append({
+            "Category": page, "Item": item, "Quantity": abs(t_val-f_val)*w_val, 
+            "From": f_val, "To": t_val, "Width": w_val, "Notes": notes_val
+        })
+        st.toast(f"Added {item}")
 
-    if is_editing:
-        if st.button("✅ Update Item"):
-            st.session_state.estimate_data[edit_idx] = {"Category": page, "Item": item, "Quantity": abs(t_val-f_val)*w_val, "From": f_val, "To": t_val, "Width": w_val, "Notes": notes_val, "Base": base_val, "Sod": sod_val}
-            st.session_state.editing_index = None
-            st.rerun()
-    else:
-        if st.button("➕ Add Item"):
-            st.session_state.estimate_data.append({"Category": page, "Item": item, "Quantity": abs(t_val-f_val)*w_val, "From": f_val, "To": t_val, "Width": w_val, "Notes": notes_val, "Base": base_val, "Sod": sod_val})
-            st.rerun()
-
-# --- 6. RESULTS ---
+# --- 7. RESULTS & PDF EXPORT ---
 else:
     st.header(f"📊 Summary: {project_name}")
-    st.write(f"**Contract:** {contract_no} | **Est. By:** {est_by} | **Date:** {report_date}")
+    
+    # PDF Generator Function
+    def create_pdf_report():
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font("Arial", 'B', 16)
+        pdf.cell(0, 10, f"Estimate Report: {project_name}", ln=True)
+        pdf.set_font("Arial", size=10)
+        pdf.cell(0, 10, f"Contract: {contract_no} | Date: {report_date} | Est by: {est_by}", ln=True)
+        pdf.ln(5)
+
+        # Add Checklist Section
+        pdf.set_font("Arial", 'B', 12)
+        pdf.cell(0, 10, "PM Checklist Status", ln=True)
+        pdf.set_font("Arial", size=10)
+        for item, status in st.session_state.pm_checklist.items():
+            stat_text = "N/A" if status["na"] else ("COMPLETED" if status["done"] else "PENDING")
+            pdf.cell(100, 8, f"{item}:", border='B')
+            pdf.cell(40, 8, stat_text, border='B', ln=True)
+        
+        pdf.ln(10)
+        # Add Quantity Table
+        if st.session_state.estimate_data:
+            pdf.set_font("Arial", 'B', 12)
+            pdf.cell(0, 10, "Quantity Take-off", ln=True)
+            pdf.set_font("Arial", size=9)
+            pdf.cell(60, 8, "Item", border=1)
+            pdf.cell(30, 8, "Quantity", border=1)
+            pdf.cell(30, 8, "Stationing", border=1, ln=True)
+            
+            for row in st.session_state.estimate_data:
+                pdf.cell(60, 8, str(row['Item'][:30]), border=1)
+                pdf.cell(30, 8, f"{row['Quantity']:.2f}", border=1)
+                pdf.cell(30, 8, f"{row['From']}-{row['To']}", border=1, ln=True)
+        
+        return pdf.output(dest='S').encode('latin-1')
+
+    # Display in App
     if st.session_state.estimate_data:
         df = pd.DataFrame(st.session_state.estimate_data)
-        st.table(df.groupby(['Category', 'Item'])['Quantity'].sum().reset_index())
-        st.divider()
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.dataframe(df, use_container_width=True)
+        
+        pdf_data = create_pdf_report()
+        st.download_button(label="📥 Download PDF Estimate", data=pdf_data, 
+                           file_name=f"{project_name}_Estimate.pdf", mime="application/pdf")
     else:
-        st.warning("No data recorded.")
+        st.warning("No quantities recorded yet.")

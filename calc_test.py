@@ -21,7 +21,7 @@ def check_password():
 if not check_password():
     st.stop()
 
-# --- 1. DATA LOADING (Ultra-Robust Version) ---
+# --- 1. DATA LOADING ---
 st.set_page_config(page_title="Regina Master Estimator", layout="wide")
 
 @st.cache_data
@@ -35,7 +35,6 @@ def load_checklist_data():
                 header_idx = i
                 break
         df = pd.read_csv(csv_path, header=header_idx)
-        # Clean column names aggressively
         df.columns = [str(c).lower().strip() for c in df.columns]
         df = df.dropna(subset=['task'])
         p_col = 'phase' if 'phase' in df.columns else df.columns[1]
@@ -87,110 +86,11 @@ def handle_check_change(uid, check_type):
         if is_na:
             st.session_state.pm_checklist_state[uid]["done"] = False
 
-# --- 4. FULL MAP LIST (RE-ADDED COMPLETELY) ---
+# --- 4. FULL MAP LIST (RE-RESTORED) ---
 LIST_MAP = {
     "Concrete Replacement": [
-        "Install Standard Curb and Gutter", 
-        "Install Rolled Curb and Gutter", 
-        "Install Reverse Curb and Gutter", 
-        "Install Median Curb", 
-        "Install Sidewalk", 
-        "Install Pedestrian Ramp", 
+        "Install Standard Curb and Gutter", "Install Rolled Curb and Gutter", 
+        "Install Reverse Curb and Gutter", "Install Median Curb", 
+        "Install Sidewalk", "Install Pedestrian Ramp", 
         "Install Standard Monolithic Walk, Curb & Gutter",
         "Install Residential Driveway Crossing (130 mm)",
-        "Slabjack Concrete Slab", 
-        "Concrete Extensions (Rebuild)"
-    ],
-    "Pavement": [
-        "Asphalt Pavement Removal", 
-        "Cold Planing", 
-        "Asphalt Tack/Prime", 
-        "Hot Mix Asphaltic Concrete (Fine Mix)", 
-        "Hot Mix Asphaltic Concrete (Coarse Mix)",
-        "Excavation - Pavement Failure", 
-        "Granular Base Course"
-    ],
-    "Landscaping": [
-        "Clearing and Grubbing", 
-        "Remove/Reinstate Existing Landscape Rock", 
-        "Removal of Sidewalk Trip Hazard", 
-        "Topsoil and Seed", 
-        "Sod"
-    ],
-    "Water and Sewer": [
-        "Adjust Existing Water Box", 
-        "Adjust Existing Sewer Box", 
-        "New Hydrant Installation", 
-        "New Valve Installation"
-    ]
-}
-
-# --- 5. PDF ENGINE (Fixed AttributeError) ---
-def create_pdf(p_name, c_no, r_date, e_by):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Helvetica", 'B', 16)
-    pdf.cell(0, 10, f"Project Status: {p_name}", ln=True)
-    pdf.set_font("Helvetica", size=10)
-    pdf.cell(0, 8, f"Contract: {c_no} | Date: {r_date} | PM: {e_by}", ln=True)
-    
-    pdf.ln(5)
-    pdf.set_font("Helvetica", 'B', 12)
-    pdf.cell(0, 10, "PM Checklist Summary", ln=True)
-    
-    current_phase = ""
-    for uid, data in st.session_state.pm_checklist_state.items():
-        if data['phase'] != current_phase:
-            current_phase = data['phase']
-            pdf.ln(2)
-            pdf.set_font("Helvetica", 'B', 10)
-            pdf.cell(0, 8, f"SECTION: {current_phase}", ln=True)
-            pdf.set_font("Helvetica", size=9)
-        
-        status = "N/A" if data["na"] else ("DONE" if data["done"] else "PENDING")
-        pdf.cell(145, 7, f"  {data['task']}", border='B')
-        pdf.cell(35, 7, status, border='B', ln=True, align='C')
-    
-    return pdf.output() # FIXED: Removed .encode() and dest='S' for compatibility
-
-# --- 6. SIDEBAR ---
-with st.sidebar:
-    st.title("📋 Control Panel")
-    p_name = st.text_input("Project Name", value="11th Ave Revitalization")
-    c_no = st.text_input("Contract #", value="2026-SIRP")
-    r_date = st.date_input("Report Date", date.today())
-    e_by = st.text_input("PM Name")
-    
-    st.divider()
-    st.write("### 💾 Save/Load Progress")
-    st.download_button("💾 Save Progress (.json)", data=save_state(), file_name=f"{p_name}_save.json", use_container_width=True)
-    up_file = st.file_uploader("📂 Load Progress", type="json")
-    if up_file and st.button("Apply Loaded Data", use_container_width=True):
-        load_state(up_file)
-
-    st.divider()
-    # PDF Button
-    pdf_output = create_pdf(p_name, c_no, str(r_date), e_by)
-    st.download_button("📥 EXPORT PDF REPORT", data=pdf_output, file_name=f"{p_name}_Report.pdf", 
-                       mime="application/pdf", type="primary", use_container_width=True)
-    
-    st.divider()
-    page = st.radio("Menu", ["Global Quick Estimate", "PM Checklist"] + list(LIST_MAP.keys()) + ["Estimation Result"])
-
-# --- 7. PAGES ---
-if page == "PM Checklist":
-    st.header("📋 Project Management Checklist")
-    phases = checklist_df['p_clean'].unique()
-    for phase in phases:
-        with st.expander(f"Phase: {phase}", expanded=True):
-            p_uids = [u for u, v in st.session_state.pm_checklist_state.items() if v['phase'] == phase]
-            for uid in p_uids:
-                data = st.session_state.pm_checklist_state[uid]
-                c1, c2, c3, c4 = st.columns([0.6, 0.15, 0.15, 0.1])
-                with c1:
-                    style = "color: #adb5bd; text-decoration: line-through;" if data["na"] else "font-weight: bold;"
-                    st.markdown(f"<p style='{style} margin:0;'>{data['task']}</p>", unsafe_allow_html=True)
-                with c2:
-                    st.checkbox("Done", key=f"d_{uid}", value=data["done"], disabled=data["na"], on_change=handle_check_change, args=(uid, "done"))
-                with c3:
-                    st.checkbox("N/A", key

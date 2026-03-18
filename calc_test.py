@@ -12,7 +12,6 @@ def check_password():
             del st.session_state["password"]
         else:
             st.session_state["password_correct"] = False
-
     if "password_correct" not in st.session_state:
         st.text_input("Please enter the password", type="password", on_change=password_entered, key="password")
         return False
@@ -21,7 +20,7 @@ def check_password():
 if not check_password():
     st.stop()
 
-# --- 1. DATA LOADING ---
+# --- 1. INITIALIZATION & DATA LOADING ---
 st.set_page_config(page_title="Regina Master Estimator", layout="wide")
 
 @st.cache_data
@@ -35,6 +34,8 @@ def load_checklist_data():
                 header_idx = i
                 break
         df = pd.read_csv(csv_path, header=header_idx)
+        # Standardize column names to prevent KeyErrors
+        df.columns = [str(c).strip() for c in df.columns]
         df = df.dropna(subset=['Task'])
         df['Phase'] = df['Phase'].fillna("General/Other").str.strip()
         df['Task'] = df['Task'].str.strip()
@@ -43,18 +44,14 @@ def load_checklist_data():
 
 checklist_df = load_checklist_data()
 
-# Initialize State
+# Initialize Session States
+if 'estimate_data' not in st.session_state:
+    st.session_state.estimate_data = []
 if 'pm_checklist_state' not in st.session_state:
     st.session_state.pm_checklist_state = {}
     for _, row in checklist_df.iterrows():
-        # Create a truly unique ID for every single row
         uid = f"{row['Phase']}_{row['Task']}_{row['index']}"
-        st.session_state.pm_checklist_state[uid] = {
-            "task": row['Task'], 
-            "done": False, 
-            "na": False, 
-            "phase": row['Phase']
-        }
+        st.session_state.pm_checklist_state[uid] = {"task": row['Task'], "done": False, "na": False, "phase": row['Phase']}
 
 # --- 2. CALLBACKS ---
 def handle_check_change(uid, type):
@@ -66,29 +63,30 @@ def handle_check_change(uid, type):
         if is_na:
             st.session_state.pm_checklist_state[uid]["done"] = False
 
-# --- 3. PDF ENGINE ---
-def create_pdf(proj_name, cont_no, date_str, est_by):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", 'B', 16)
-    pdf.cell(0, 10, f"Project Report: {proj_name}", ln=True)
-    pdf.set_font("Arial", size=10)
-    pdf.cell(0, 8, f"Contract: {cont_no} | Date: {date_str} | Est: {est_by}", ln=True)
-    pdf.ln(5)
-    
-    current_phase = ""
-    for uid, data in st.session_state.pm_checklist_state.items():
-        if data['phase'] != current_phase:
-            current_phase = data['phase']
-            pdf.ln(3)
-            pdf.set_font("Arial", 'B', 11)
-            pdf.cell(0, 8, f"SECTION: {current_phase}", ln=True, fill=False)
-            pdf.set_font("Arial", size=9)
-        
-        status = "N/A" if data["na"] else ("DONE" if data["done"] else "PENDING")
-        pdf.cell(145, 7, f"  {data['task']}", border='B')
-        pdf.cell(35, 7, status, border='B', ln=True, align='C')
-    return pdf.output(dest='S').encode('latin-1')
+# --- 3. DATA TREE MAP (Original Lists Re-added) ---
+LIST_MAP = {
+    "Concrete Replacement": [
+        "Install Standard Curb and Gutter", "Install Rolled Curb and Gutter", 
+        "Install Reverse Curb and Gutter", "Install Median Curb", 
+        "Install Sidewalk", "Install Pedestrian Ramp", 
+        "Install Standard Monolithic Walk, Curb & Gutter",
+        "Install Residential Driveway Crossing (130 mm)",
+        "Slabjack Concrete Slab", "Concrete Extensions (Rebuild)"
+    ],
+    "Pavement": [
+        "Asphalt Pavement Removal", "Cold Planing", "Asphalt Tack/Prime", 
+        "Hot Mix Asphaltic Concrete (Fine Mix)", "Hot Mix Asphaltic Concrete (Coarse Mix)",
+        "Excavation - Pavement Failure", "Granular Base Course"
+    ],
+    "Landscaping": [
+        "Clearing and Grubbing", "Remove/Reinstate Existing Landscape Rock", 
+        "Removal of Sidewalk Trip Hazard", "Topsoil and Seed", "Sod"
+    ],
+    "Water and Sewer": [
+        "Adjust Existing Water Box", "Adjust Existing Sewer Box", 
+        "New Hydrant Installation", "New Valve Installation"
+    ]
+}
 
 # --- 4. SIDEBAR ---
 with st.sidebar:
@@ -99,46 +97,108 @@ with st.sidebar:
     e_by = st.text_input("Estimated by")
     
     st.divider()
-    page = st.radio("Navigation", ["PM Checklist", "Estimation Result"])
+    page = st.radio("Navigation", ["Global Quick Estimate", "PM Checklist"] + list(LIST_MAP.keys()) + ["Estimation Result"])
+    
+    if st.button("Clear All Data"):
+        st.session_state.estimate_data = []
+        for uid in st.session_state.pm_checklist_state:
+            st.session_state.pm_checklist_state[uid]["done"] = False
+            st.session_state.pm_checklist_state[uid]["na"] = False
+        st.rerun()
 
-# --- 5. PAGE: PM CHECKLIST ---
-if page == "PM Checklist":
+# --- 5. PDF ENGINE ---
+def create_pdf():
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", 'B', 16)
+    pdf.cell(0, 10, f"Project Report: {p_name}", ln=True)
+    pdf.set_font("Arial", size=10)
+    pdf.cell(0, 8, f"Contract: {c_no} | Date: {r_date} | Est: {e_by}", ln=True)
+    pdf.ln(5)
+    
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(0, 10, "PM Checklist Status", ln=True)
+    current_phase = ""
+    for uid, data in st.session_state.pm_checklist_state.items():
+        if data['phase'] != current_phase:
+            current_phase = data['phase']
+            pdf.ln(2)
+            pdf.set_font("Arial", 'B', 10)
+            pdf.cell(0, 8, f"SECTION: {current_phase}", ln=True)
+        pdf.set_font("Arial", size=9)
+        status = "N/A" if data["na"] else ("DONE" if data["done"] else "PENDING")
+        pdf.cell(145, 7, f"  {data['task']}", border='B')
+        pdf.cell(35, 7, status, border='B', ln=True, align='C')
+    
+    if st.session_state.estimate_data:
+        pdf.ln(10)
+        pdf.set_font("Arial", 'B', 12)
+        pdf.cell(0, 10, "Quantity Summary", ln=True)
+        for row in st.session_state.estimate_data:
+            pdf.set_font("Arial", size=9)
+            pdf.cell(100, 7, row['Item'], border=1)
+            pdf.cell(40, 7, f"{row['Quantity']:.2f}", border=1, ln=True)
+            
+    return pdf.output(dest='S').encode('latin-1')
+
+# --- 6. PAGES ---
+
+if page == "Global Quick Estimate":
+    st.header("🚀 SIRP Estimates: Global Automated Tool")
+    with st.container(border=True):
+        col_left, col_right = st.columns(2)
+        with col_left:
+            road_len = st.number_input("Road Length (m)", value=0.0)
+            road_width = st.number_input("Road Width (m)", value=0.0)
+        with col_right:
+            mill_depth = st.number_input("Mill depth (mm)", value=50)
+
+    if st.button("⚡ Generate Automated Take-off", type="primary"):
+        st.session_state.estimate_data.append({
+            "Category": "Pavement", "Item": f"Cold Planing ({mill_depth}mm)", 
+            "Quantity": road_len * road_width, "From": 0, "To": road_len, "Notes": "Auto"
+        })
+        st.success("Added to summary!")
+
+elif page == "PM Checklist":
     st.header("📋 Project Management Checklist")
-    
     phases = checklist_df['Phase'].unique()
-    
     for phase in phases:
         with st.expander(f"Phase: {phase}", expanded=True):
-            # Filter the unique IDs belonging to this phase
-            phase_uids = [uid for uid, val in st.session_state.pm_checklist_state.items() if val['phase'] == phase]
-            
-            for uid in phase_uids:
+            p_uids = [u for u, v in st.session_state.pm_checklist_state.items() if v['phase'] == phase]
+            for uid in p_uids:
                 data = st.session_state.pm_checklist_state[uid]
-                col1, col2, col3 = st.columns([0.6, 0.2, 0.2])
-                
-                with col1:
+                c1, c2, c3 = st.columns([0.6, 0.2, 0.2])
+                with c1:
                     if data["na"]:
                         st.markdown(f"<p style='color: #adb5bd; text-decoration: line-through; margin:0;'>{data['task']}</p>", unsafe_allow_html=True)
                     else:
                         st.markdown(f"<p style='font-weight: bold; margin:0;'>{data['task']}</p>", unsafe_allow_html=True)
-                
-                with col2:
-                    st.checkbox("Done", key=f"d_{uid}", 
-                                value=data["done"], 
-                                disabled=data["na"],
-                                on_change=handle_check_change, args=(uid, "done"))
-                
-                with col3:
-                    st.checkbox("N/A", key=f"n_{uid}", 
-                                value=data["na"],
-                                on_change=handle_check_change, args=(uid, "na"))
+                with c2:
+                    st.checkbox("Done", key=f"d_{uid}", value=data["done"], disabled=data["na"], on_change=handle_check_change, args=(uid, "done"))
+                with c3:
+                    st.checkbox("N/A", key=f"n_{uid}", value=data["na"], on_change=handle_check_change, args=(uid, "na"))
 
-    st.divider()
-    btn_pdf = create_pdf(p_name, c_no, str(r_date), e_by)
-    st.download_button("📥 Download Final PDF Report", data=btn_pdf, file_name=f"{p_name}_Report.pdf", mime="application/pdf", type="primary")
+elif page == "Estimation Result":
+    st.header("📊 Final Summary")
+    if st.session_state.estimate_data:
+        st.table(pd.DataFrame(st.session_state.estimate_data))
+    st.download_button("📥 Download Final PDF Report", data=create_pdf(), file_name=f"{p_name}_Report.pdf", type="primary")
 
-else:
-    st.header("📊 Results Summary")
-    st.write("Review your checklist status and download the final report.")
-    btn_pdf = create_pdf(p_name, c_no, str(r_date), e_by)
-    st.download_button("📄 Generate Official PDF", data=btn_pdf, file_name=f"{p_name}_Summary.pdf", type="primary")
+else: # Manual Entry Pages (Concrete, Pavement, etc.)
+    st.header(f"Section: {page}")
+    items = LIST_MAP.get(page, [])
+    with st.container(border=True):
+        col1, col2 = st.columns([0.6, 0.4])
+        with col1:
+            item = st.selectbox("Item Selection", items)
+            f_val = st.number_input("From Station", value=0.0)
+            t_val = st.number_input("To Station", value=0.0)
+        with col2:
+            notes = st.text_area("Notes")
+    if st.button("➕ Add Item"):
+        st.session_state.estimate_data.append({
+            "Category": page, "Item": item, "Quantity": abs(t_val-f_val)*1.5, 
+            "From": f_val, "To": t_val, "Notes": notes
+        })
+        st.toast(f"Added {item}")

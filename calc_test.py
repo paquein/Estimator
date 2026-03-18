@@ -123,41 +123,49 @@ def create_pdf(p_name, c_no, r_date, e_by):
 
 # --- 5. SIDEBAR ---
 with st.sidebar:
-    st.title("📋 Project Control")
+    st.title("⚙️ Project Settings")
     p_name = st.text_input("Project Name", value="11th Ave Revitalization")
     c_no = st.text_input("Contract #", value="2026-SIRP")
     r_date = st.date_input("Report Date", date.today())
     e_by = st.text_input("PM Name")
     st.divider()
-    page = st.radio("Menu", ["Global Quick Estimate", "PM Checklist"] + list(LIST_MAP.keys()) + ["Estimation Result"])
+    page = st.radio("Navigation", ["Global Quick Estimate", "PM Checklist"] + list(LIST_MAP.keys()) + ["Estimation Result"])
 
 # --- 6. PAGES ---
 if page == "PM Checklist":
-    # --- TOP HEADER & ACTION BUTTONS ---
-    # Layout: Header (40%), Save (20%), Load (20%), Export (20%)
-    h_col, s_col, l_col, p_col = st.columns([0.4, 0.2, 0.2, 0.2])
+    # --- HEADER AND VERTICAL STACKED BUTTONS ---
+    main_col, btn_col = st.columns([0.75, 0.25])
     
-    with h_col:
+    with main_col:
         st.header("📋 Project Checklist")
         
-    with s_col:
-        st.download_button("💾 Save Progress", data=save_state(), 
-                           file_name=f"{p_name}_save.json", use_container_width=True)
+    with btn_col:
+        # Button 1: Save
+        st.download_button(
+            label="💾 Save Progress", 
+            data=save_state(), 
+            file_name=f"{p_name}_save.json", 
+            use_container_width=True
+        )
         
-    with l_col:
-        up_file = st.file_uploader("📂 Load Progress", type="json", label_visibility="collapsed")
+        # Button 2: Load (Styled to match)
+        st.write('<p style="font-size:14px; margin-bottom:0;">Load Progress</p>', unsafe_allow_html=True)
+        up_file = st.file_uploader("Load Progress", type="json", label_visibility="collapsed")
         if up_file:
-            # DIRECT LOADING: No "Apply" button needed
             data = json.load(up_file)
             st.session_state.pm_checklist_state = data.get("checklist", {})
             st.session_state.estimate_data = data.get("estimates", [])
-            st.rerun() # Refresh page immediately to reflect changes
+            st.rerun()
 
-    with p_col:
+        # Button 3: Export PDF
         pdf_data = create_pdf(p_name, c_no, str(r_date), e_by)
-        st.download_button("📥 Export PDF", data=pdf_data, 
-                           file_name=f"{p_name}_Report.pdf", mime="application/pdf", 
-                           type="primary", use_container_width=True)
+        st.download_button(
+            label="📥 Export PDF", 
+            data=pdf_data, 
+            file_name=f"{p_name}_Report.pdf", 
+            mime="application/pdf", 
+            use_container_width=True
+        )
 
     st.divider()
     
@@ -167,7 +175,7 @@ if page == "PM Checklist":
             p_uids = [u for u, v in st.session_state.pm_checklist_state.items() if v['phase'] == phase]
             for uid in p_uids:
                 data = st.session_state.pm_checklist_state[uid]
-                c1, c2, c3, c4 = st.columns([0.6, 0.15, 0.15, 0.1])
+                c1, c2, c3 = st.columns([0.7, 0.15, 0.15])
                 with c1:
                     style = "color: #adb5bd; text-decoration: line-through;" if data["na"] else "font-weight: bold;"
                     st.markdown(f"<p style='{style} margin:0;'>{data['task']}</p>", unsafe_allow_html=True)
@@ -189,9 +197,9 @@ elif page == "Estimation Result":
     if st.session_state.estimate_data:
         st.dataframe(pd.DataFrame(st.session_state.estimate_data), use_container_width=True)
     else:
-        st.info("No estimates recorded yet.")
+        st.info("No data recorded.")
 
-else: # Manual Entry Pages
+else: # Manual entry sections
     st.header(f"Section: {page}")
     items = LIST_MAP.get(page, [])
     it = st.selectbox("Select Item", items)

@@ -61,11 +61,11 @@ if 'pm_checklist_state' not in st.session_state:
 # --- 2. SAVE/LOAD LOGIC ---
 def save_state():
     st.session_state.last_save_time = datetime.now().strftime("%H:%M:%S")
-    state = {
+    state_json = json.dumps({
         "checklist": st.session_state.pm_checklist_state,
         "estimates": st.session_state.estimate_data
-    }
-    return json.dumps(state)
+    })
+    return state_json
 
 def load_state(uploaded_file):
     try:
@@ -125,7 +125,7 @@ LIST_MAP = {
     ]
 }
 
-# --- 5. PDF ENGINE (Fixed raise unsupported_error) ---
+# --- 5. PDF ENGINE (Fixed "unsupported_error") ---
 def create_pdf(p_name, c_no, r_date, e_by):
     pdf = FPDF()
     pdf.add_page()
@@ -148,7 +148,7 @@ def create_pdf(p_name, c_no, r_date, e_by):
         pdf.cell(145, 7, f"  {data['task']}", border='B')
         pdf.cell(35, 7, status, border='B', ln=True, align='C')
     
-    # Ensuring return as BYTES for Streamlit compatibility
+    # Returning as BYTES to satisfy Streamlit download_button
     return bytes(pdf.output())
 
 # --- 6. SIDEBAR ---
@@ -160,18 +160,32 @@ with st.sidebar:
     e_by = st.text_input("PM Name")
     
     st.divider()
-    st.write("### 💾 Save/Load")
-    st.download_button("💾 Save Progress (.json)", data=save_state(), file_name=f"{p_name}_save.json", use_container_width=True)
+    st.write("### 💾 Data Resilience")
+    # Save Progress
+    st.download_button(
+        label="💾 Save Progress (.json)", 
+        data=save_state(), 
+        file_name=f"{p_name}_save.json", 
+        use_container_width=True
+    )
     
-    up_file = st.file_uploader("📂 Load Progress", type="json")
-    if up_file and st.button("Apply Loaded Data", use_container_width=True):
-        load_state(up_file)
+    # Load Progress
+    up_file = st.file_uploader("📂 Load Saved File", type="json")
+    if up_file:
+        if st.button("Apply Loaded Progress", use_container_width=True):
+            load_state(up_file)
 
     st.divider()
-    # Fixed the crash by ensuring bytes() conversion
-    pdf_bytes = create_pdf(p_name, c_no, str(r_date), e_by)
-    st.download_button("📥 EXPORT PDF REPORT", data=pdf_bytes, file_name=f"{p_name}_Report.pdf", 
-                       mime="application/pdf", type="primary", use_container_width=True)
+    # Export PDF - Using the fixed create_pdf function
+    pdf_data = create_pdf(p_name, c_no, str(r_date), e_by)
+    st.download_button(
+        label="📥 EXPORT PDF REPORT", 
+        data=pdf_data, 
+        file_name=f"{p_name}_Report.pdf", 
+        mime="application/pdf", 
+        type="primary", 
+        use_container_width=True
+    )
     
     st.divider()
     page = st.radio("Menu", ["Global Quick Estimate", "PM Checklist"] + list(LIST_MAP.keys()) + ["Estimation Result"])
@@ -198,7 +212,7 @@ elif page == "Global Quick Estimate":
     st.header("🚀 Global Automated Tool")
     l = st.number_input("Road Length (m)", 0.0)
     w = st.number_input("Width (m)", 0.0)
-    if st.button("Add to Summary", type="primary"):
+    if st.button("Add to Summary"):
         st.session_state.estimate_data.append({"Category": "Pavement", "Item": "Road Paving", "Quantity": l*w})
         st.toast("Added!")
 
@@ -206,8 +220,10 @@ elif page == "Estimation Result":
     st.header("📊 Final Summary")
     if st.session_state.estimate_data:
         st.dataframe(pd.DataFrame(st.session_state.estimate_data), use_container_width=True)
+    else:
+        st.info("No estimates added yet.")
 
-else:
+else: # Manual Selection Pages
     st.header(f"Section: {page}")
     items = LIST_MAP.get(page, [])
     it = st.selectbox("Select Item", items)
